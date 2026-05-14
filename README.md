@@ -1,1 +1,1 @@
-# AI Schedule Planner
+# AI-powered-daily-schedule-planner-app

@@ -51,24 +51,47 @@ function mapPriority(p: string, name: string): Priority {
   return "routine";
 }
 
+function convertTo24Hour(time12h: string): string {
+  const match = time12h.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?$/);
+  if (!match) return "07:00";
+  let h = parseInt(match[1]);
+  const m = match[2];
+  const modifier = match[3]?.toUpperCase();
+
+  if (modifier === "PM" && h < 12) h += 12;
+  if (modifier === "AM" && h === 12) h = 0;
+  
+  return `${h.toString().padStart(2, "0")}:${m}`;
+}
+
 export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExtendedState, setIsExtendedState] = useState(false);
   const [tasks, setTasks] = useState<TaskDef[]>(defaultTasks);
   const [loading, setLoading] = useState(false);
+  const [sleptAt, setSleptAt] = useState("02:00 AM");
+  const [wakeTime, setWakeTime] = useState("07:00 AM");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const formattedDate = new Date().toLocaleDateString('en-GB', { 
+    weekday: 'long', 
+    day: 'numeric', 
+    month: 'long' 
+  });
+
+  const generateSchedule = async (file: File, isRegenerate = false) => {
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
       setLoading(true);
+      const wake24 = convertTo24Hour(wakeTime);
+      const sleep24 = convertTo24Hour(sleptAt);
+      
       const response = await axios.post(
-        "http://127.0.0.1:8000/upload?wake_time=07:00&slept_at=02:00",
+        `http://127.0.0.1:8000/upload?wake_time=${wake24}&slept_at=${sleep24}`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );
@@ -84,7 +107,7 @@ export default function App() {
       }));
 
       setTasks(prev => {
-        if (prev.length === 0) return newTasks;
+        if (isRegenerate || prev.length === 0) return newTasks;
         // Merge and sort by time
         return [...prev, ...newTasks].sort((a, b) => a.time.localeCompare(b.time));
       });
@@ -94,8 +117,20 @@ export default function App() {
       alert("Upload failed. Please try again.");
     } finally {
       setLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFile(file);
+    await generateSchedule(file, false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleRegenerate = async () => {
+    if (!uploadedFile) return;
+    await generateSchedule(uploadedFile, true);
   };
 
   const handleAddTask = (newTask: any) => {
@@ -139,22 +174,58 @@ export default function App() {
         {/* Today section */}
         <div className="mb-8">
           <div className="text-xs font-semibold text-[#666] tracking-wider mb-2">TODAY</div>
-          <div className="text-lg font-medium text-gray-200">Thursday, 14 May</div>
+          <div className="text-lg font-medium text-gray-200">{formattedDate}</div>
         </div>
 
         {/* Slept at */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="text-xs font-semibold text-[#666] tracking-wider mb-2 uppercase">Slept at</div>
           <div className="flex items-center gap-3">
-            <div className="bg-[#1a1a21] border border-[#333] rounded-xl px-4 py-3 flex items-center justify-between w-40">
-              <span className="font-mono text-gray-200 font-medium tracking-wide">02:00 AM</span>
+            <div className="bg-[#1a1a21] border border-[#333] rounded-xl px-4 py-3 flex items-center justify-between w-40 focus-within:border-[#555] transition-colors">
+              <input 
+                type="text" 
+                value={sleptAt}
+                onChange={(e) => setSleptAt(e.target.value)}
+                className="font-mono text-gray-200 font-medium tracking-wide bg-transparent outline-none w-20" 
+              />
               <Clock className="w-4 h-4 text-[#888]" />
             </div>
-            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold">
-              <Moon className="w-3.5 h-3.5" />
-              nap
-            </div>
+            {(() => {
+              const h = parseInt(convertTo24Hour(sleptAt).split(":")[0]);
+              if (h >= 1 && h <= 5) {
+                return (
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold">
+                    <Moon className="w-3.5 h-3.5" />
+                    nap
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
+        </div>
+
+        {/* Wake Time */}
+        <div className="mb-8">
+          <div className="text-xs font-semibold text-[#666] tracking-wider mb-2 uppercase">Wake Time</div>
+          <div className="bg-[#1a1a21] border border-[#333] rounded-xl px-4 py-3 flex items-center justify-between w-40 focus-within:border-[#555] transition-colors mb-3">
+            <input 
+              type="text" 
+              value={wakeTime}
+              onChange={(e) => setWakeTime(e.target.value)}
+              className="font-mono text-gray-200 font-medium tracking-wide bg-transparent outline-none w-20" 
+            />
+            <Clock className="w-4 h-4 text-[#888]" />
+          </div>
+          {uploadedFile && (
+            <button 
+              onClick={handleRegenerate}
+              disabled={loading}
+              className="w-40 py-2 bg-blue-600/20 text-blue-500 border border-blue-500/30 hover:bg-blue-600/30 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              {loading ? "Generating..." : "Regenerate"}
+            </button>
+          )}
         </div>
 
         {/* Stats */}

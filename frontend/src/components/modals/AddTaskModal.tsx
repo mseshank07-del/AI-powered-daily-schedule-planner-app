@@ -5,10 +5,13 @@ import { cn } from "../../lib/utils";
 type AddTaskModalProps = {
   open: boolean;
   onClose: () => void;
+  onAdd: (task: any) => void;
 };
 
-export default function AddTaskModal({ open, onClose }: AddTaskModalProps) {
+export default function AddTaskModal({ open, onClose, onAdd }: AddTaskModalProps) {
   const [priority, setPriority] = useState<"urgent" | "medium" | "low" | null>(null);
+  const [title, setTitle] = useState("");
+  const [duration, setDuration] = useState("");
 
   if (!open) return null;
 
@@ -35,6 +38,8 @@ export default function AddTaskModal({ open, onClose }: AddTaskModalProps) {
             </label>
             <input
               type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Finish OS assignment, Drop sister..."
               className="w-full bg-[#1a1a21] border border-transparent focus:border-[#444] rounded-xl px-4 py-3.5 text-white placeholder-[#555] outline-none transition-colors text-sm"
             />
@@ -60,6 +65,8 @@ export default function AddTaskModal({ open, onClose }: AddTaskModalProps) {
               </label>
               <input
                 type="text"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
                 placeholder="e.g. 2h, 45m"
                 className="w-full bg-[#1a1a21] border border-transparent focus:border-[#444] rounded-xl px-4 py-3.5 text-white placeholder-[#555] outline-none transition-colors text-sm"
               />
@@ -177,7 +184,18 @@ export default function AddTaskModal({ open, onClose }: AddTaskModalProps) {
             Cancel
           </button>
           <button
-            onClick={onClose}
+            onClick={() => {
+              onAdd({
+                title: title || "New Task",
+                duration: duration || "1h",
+                priority: priority || "medium",
+                isDone: false,
+                isFixed: false
+              });
+              setTitle("");
+              setDuration("");
+              setPriority(null);
+            }}
             className="flex-[1.5] py-3.5 rounded-xl bg-white text-black font-semibold hover:bg-gray-200 transition-colors text-sm"
           >
             Confirm & reschedule

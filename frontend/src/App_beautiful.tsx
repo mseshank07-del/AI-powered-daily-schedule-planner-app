@@ -1,5 +1,4 @@
-import { useState, useRef } from "react";
-import axios from "axios";
+import { useState } from "react";
 import { Clock, Moon, Upload, Plus, MoreHorizontal, Calendar, Undo2, CheckCircle2 } from "lucide-react";
 import TaskCard from "./components/task/TaskCard";
 import type { Priority } from "./components/task/TaskCard";
@@ -30,100 +29,9 @@ const defaultTasks: TaskDef[] = [
   { time: "15:25", title: "YouTube content planning", duration: "45m", priority: "low" },
 ];
 
-function getDuration(start: string, end: string) {
-  if (!start || !end) return "";
-  const [h1, m1] = start.split(":").map(Number);
-  const [h2, m2] = end.split(":").map(Number);
-  let diffMin = (h2 * 60 + m2) - (h1 * 60 + m1);
-  if (diffMin < 0) diffMin += 24 * 60;
-  const hrs = Math.floor(diffMin / 60);
-  const mins = diffMin % 60;
-  if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
-  if (hrs > 0) return `${hrs}h`;
-  return `${mins}m`;
-}
-
-function mapPriority(p: string, name: string): Priority {
-  if (name.toLowerCase().includes("nap") || name.toLowerCase().includes("sleep")) return "sleep";
-  if (p === "high") return "urgent";
-  if (p === "medium") return "medium";
-  if (p === "low") return "low";
-  return "routine";
-}
-
 export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExtendedState, setIsExtendedState] = useState(false);
-  const [tasks, setTasks] = useState<TaskDef[]>(defaultTasks);
-  const [loading, setLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      setLoading(true);
-      const response = await axios.post(
-        "http://127.0.0.1:8000/upload?wake_time=07:00&slept_at=02:00",
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
-
-      const newTasks: TaskDef[] = response.data.schedule.map((t: any) => ({
-        time: t.start_time,
-        title: t.name,
-        subtitle: t.type,
-        duration: getDuration(t.start_time, t.end_time),
-        priority: mapPriority(t.priority, t.name),
-        isFixed: t.is_fixed,
-        isDone: false
-      }));
-
-      setTasks(prev => {
-        if (prev.length === 0) return newTasks;
-        // Merge and sort by time
-        return [...prev, ...newTasks].sort((a, b) => a.time.localeCompare(b.time));
-      });
-      setIsExtendedState(false);
-    } catch (error) {
-      console.error(error);
-      alert("Upload failed. Please try again.");
-    } finally {
-      setLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleAddTask = (newTask: any) => {
-    setTasks(prev => {
-      // Find next available slot time
-      let nextTime = "15:25"; // default fallback
-      if (prev.length > 0) {
-        const lastTask = prev[prev.length - 1];
-        // naive time addition for next slot (assuming duration in 'h' or 'm')
-        // We'll just append it with a generated time for now to satisfy requirements
-        const [h, m] = lastTask.time.split(":").map(Number);
-        let durationMins = 60; // assume 1h if parsing fails
-        if (lastTask.duration.includes("h")) {
-          durationMins = parseInt(lastTask.duration) * 60;
-        } else if (lastTask.duration.includes("m")) {
-          durationMins = parseInt(lastTask.duration);
-        }
-        let totalMins = h * 60 + m + durationMins;
-        const nextH = Math.floor(totalMins / 60) % 24;
-        const nextM = totalMins % 60;
-        nextTime = `${nextH.toString().padStart(2, "0")}:${nextM.toString().padStart(2, "0")}`;
-      }
-      
-      const taskWithTime = { ...newTask, time: nextTime };
-      return [...prev, taskWithTime].sort((a, b) => a.time.localeCompare(b.time));
-    });
-    setIsAddModalOpen(false);
-  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white flex font-sans">
@@ -160,19 +68,19 @@ export default function App() {
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 mb-10">
           <div className="bg-[#111115] border border-[#222] rounded-xl p-4">
-            <div className="text-3xl font-medium text-white mb-1">{tasks.length}</div>
+            <div className="text-3xl font-medium text-white mb-1">7</div>
             <div className="text-xs font-medium text-[#666]">tasks today</div>
           </div>
           <div className="bg-[#111115] border border-[#222] rounded-xl p-4">
-            <div className="text-3xl font-medium text-green-500 mb-1">{tasks.filter(t => t.isDone).length}</div>
+            <div className="text-3xl font-medium text-green-500 mb-1">1</div>
             <div className="text-xs font-medium text-[#666]">done</div>
           </div>
           <div className="bg-[#111115] border border-[#222] rounded-xl p-4">
-            <div className="text-3xl font-medium text-red-500 mb-1">{tasks.filter(t => t.priority === "urgent").length}</div>
+            <div className="text-3xl font-medium text-red-500 mb-1">2</div>
             <div className="text-xs font-medium text-[#666]">urgent</div>
           </div>
           <div className="bg-[#111115] border border-[#222] rounded-xl p-4">
-            <div className="text-3xl font-medium text-[#888] mb-1">0</div>
+            <div className="text-3xl font-medium text-[#888] mb-1">1</div>
             <div className="text-xs font-medium text-[#666]">moved tmrw</div>
           </div>
         </div>
@@ -211,20 +119,12 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-3">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  onChange={handleFileSelect} 
-                  accept="application/pdf"
-                />
                 <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-5 py-2.5 border border-[#333] hover:bg-[#1a1a21] rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                  onClick={() => setIsExtendedState(true)}
+                  className="flex items-center gap-2 px-5 py-2.5 border border-[#333] hover:bg-[#1a1a21] rounded-xl text-sm font-medium transition-colors"
                 >
                   <Upload className="w-4 h-4" />
-                  {loading ? "uploading..." : "upload schedule"}
+                  upload schedule
                 </button>
                 <button 
                   onClick={() => setIsAddModalOpen(true)}
@@ -264,14 +164,14 @@ export default function App() {
 
           {/* Timeline Wrapper */}
           <div className="relative pl-4 space-y-2 pb-24 border-l border-[#1a1a21] ml-4">
-            {tasks.map((task, i) => {
+            {defaultTasks.map((task, i) => {
               // Apply extended state logic simply for demonstration matching screenshot 3
               const isDropTask = task.title.includes("Drop sister");
               const isShifted = isExtendedState && i > 6 && !task.isFixed;
               const isFixed = task.isFixed || (isExtendedState && task.isDone) || task.priority === "routine";
 
               return (
-                <div key={`${task.title}-${task.time}-${i}`} className="relative -ml-[42px] pr-2">
+                <div key={i} className="relative -ml-[42px] pr-2">
                   <TaskCard
                     {...task}
                     isFixed={isFixed}
@@ -298,7 +198,7 @@ export default function App() {
         </div>
       </main>
 
-      <AddTaskModal open={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onAdd={handleAddTask} />
+      <AddTaskModal open={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} />
     </div>
   );
 }

@@ -1,9 +1,12 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { Clock, Moon, Upload, Plus, MoreHorizontal, Calendar, Undo2, CheckCircle2 } from "lucide-react";
 import TaskCard from "./components/task/TaskCard";
 import type { Priority } from "./components/task/TaskCard";
 import AddTaskModal from "./components/modals/AddTaskModal";
+import TimePicker from "./components/ui/TimePicker";
+import LiveClock from "./components/ui/LiveClock";
+import { cn } from "./lib/utils";
 
 type TaskDef = {
   time: string;
@@ -16,7 +19,7 @@ type TaskDef = {
 };
 
 const defaultTasks: TaskDef[] = [
-  { time: "06:30", title: "Wake up + bathing", duration: "30m", priority: "routine" },
+  { time: "10:30", title: "Wake up + bathing", duration: "30m", priority: "routine" },
   { time: "07:00", title: "Breakfast", duration: "30m", priority: "routine", isDone: true },
   { time: "07:30", title: "DSA — Codeforces practice", subtitle: "peak focus window", duration: "2h", priority: "urgent", isDone: true },
   { time: "09:30", title: "Short break", duration: "15m", priority: "routine", isDone: true },
@@ -51,47 +54,85 @@ function mapPriority(p: string, name: string): Priority {
   return "routine";
 }
 
-function convertTo24Hour(time12h: string): string {
-  const match = time12h.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?$/);
-  if (!match) return "07:00";
-  let h = parseInt(match[1]);
-  const m = match[2];
-  const modifier = match[3]?.toUpperCase();
-
-  if (modifier === "PM" && h < 12) h += 12;
-  if (modifier === "AM" && h === 12) h = 0;
-  
-  return `${h.toString().padStart(2, "0")}:${m}`;
-}
-
 export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isExtendedState, setIsExtendedState] = useState(false);
-  const [tasks, setTasks] = useState<TaskDef[]>(defaultTasks);
-  const [loading, setLoading] = useState(false);
-  const [sleptAt, setSleptAt] = useState("02:00 AM");
-  const [wakeTime, setWakeTime] = useState("07:00 AM");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const formattedDate = new Date().toLocaleDateString('en-GB', { 
-    weekday: 'long', 
-    day: 'numeric', 
-    month: 'long' 
+  const [tasks, setTasks] = useState<TaskDef[]>(() => {
+    try {
+      const saved = localStorage.getItem("dayplan_tasks");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed; // Fix Bug 1: keep ticked state
+      }
+    } catch (e) { }
+    return defaultTasks.map(t => ({ ...t, isDone: false }));
   });
 
-  const generateSchedule = async (file: File, isRegenerate = false) => {
+  useEffect(() => {
+    localStorage.setItem("dayplan_tasks", JSON.stringify(tasks));
+  }, [tasks]);
+
+  useEffect(() => {
+    const lastSavedDate = localStorage.getItem('dayplan_date');
+    const today = new Date().toDateString();
+    if (lastSavedDate !== today) {
+      localStorage.removeItem('dayplan_sleptAt');
+      localStorage.removeItem('dayplan_wakeTime');
+      localStorage.setItem('dayplan_date', today);
+    }
+  }, []);
+
+  const [loading, setLoading] = useState(false);
+  const [sleptAt, setSleptAt] = useState(() => localStorage.getItem('dayplan_sleptAt') || "02:00");
+  const [wakeTime, setWakeTime] = useState(() => localStorage.getItem('dayplan_wakeTime') || "07:00");
+  
+  const [isWakeLocked, setIsWakeLocked] = useState(() => !!localStorage.getItem('dayplan_wakeTime'));
+  const [isSleptLocked, setIsSleptLocked] = useState(() => !!localStorage.getItem('dayplan_sleptAt'));
+
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const b64 = localStorage.getItem("dayplan_last_pdf");
+    const fname = localStorage.getItem("dayplan_last_pdf_name");
+    if (b64 && fname) {
+      fetch(b64).then(res => res.blob()).then(blob => {
+        const file = new File([blob], fname, { type: 'application/pdf' });
+        setUploadedFile(file);
+        generateSchedule(file, true, wakeTime, sleptAt);
+      });
+    }
+  }, []);
+
+  const [currentTime, setCurrentTime] = useState(
+    new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
+  );
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const formattedDate = new Date().toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long'
+  });
+
+  const generateSchedule = async (file: File, isRegenerate = false, wTime = wakeTime, sAt = sleptAt) => {
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
       setLoading(true);
-      const wake24 = convertTo24Hour(wakeTime);
-      const sleep24 = convertTo24Hour(sleptAt);
-      
+
       const response = await axios.post(
-        `http://127.0.0.1:8000/upload?wake_time=${wake24}&slept_at=${sleep24}`,
+        `http://127.0.0.1:8000/upload?wake_time=${wTime}&slept_at=${sAt}`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );
@@ -123,14 +164,44 @@ export default function App() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      localStorage.setItem("dayplan_last_pdf", reader.result as string);
+      localStorage.setItem("dayplan_last_pdf_name", file.name);
+    };
+    reader.readAsDataURL(file);
+
     setUploadedFile(file);
-    await generateSchedule(file, false);
+    await generateSchedule(file, false, wakeTime, sleptAt);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = async (wTime = wakeTime, sAt = sleptAt) => {
     if (!uploadedFile) return;
-    await generateSchedule(uploadedFile, true);
+    await generateSchedule(uploadedFile, true, wTime, sAt);
+  };
+
+  const handleToggleWakeLock = async () => {
+    if (isWakeLocked) {
+      localStorage.removeItem('dayplan_wakeTime');
+      setIsWakeLocked(false);
+    } else {
+      localStorage.setItem('dayplan_wakeTime', wakeTime);
+      setIsWakeLocked(true);
+      if (uploadedFile) await handleRegenerate(wakeTime, sleptAt);
+    }
+  };
+
+  const handleToggleSleptLock = async () => {
+    if (isSleptLocked) {
+      localStorage.removeItem('dayplan_sleptAt');
+      setIsSleptLocked(false);
+    } else {
+      localStorage.setItem('dayplan_sleptAt', sleptAt);
+      setIsSleptLocked(true);
+      if (uploadedFile) await handleRegenerate(wakeTime, sleptAt);
+    }
   };
 
   const handleAddTask = (newTask: any) => {
@@ -153,16 +224,66 @@ export default function App() {
         const nextM = totalMins % 60;
         nextTime = `${nextH.toString().padStart(2, "0")}:${nextM.toString().padStart(2, "0")}`;
       }
-      
+
       const taskWithTime = { ...newTask, time: nextTime };
       return [...prev, taskWithTime].sort((a, b) => a.time.localeCompare(b.time));
     });
     setIsAddModalOpen(false);
   };
 
+  const handleExport = async () => {
+    try {
+      const schedulePayload = tasks.map(t => {
+        const [h, m] = t.time.split(":").map(Number);
+        let durMins = 60;
+        if (t.duration.includes("h") && t.duration.includes("m")) {
+          const parts = t.duration.split(" ");
+          durMins = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        } else if (t.duration.includes("h")) {
+          durMins = parseInt(t.duration) * 60;
+        } else if (t.duration.includes("m")) {
+          durMins = parseInt(t.duration);
+        }
+        const totalMins = h * 60 + m + durMins;
+        const endH = Math.floor(totalMins / 60) % 24;
+        const endM = totalMins % 60;
+        const end_time = `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+
+        return {
+          name: t.title,
+          start_time: t.time,
+          end_time: end_time,
+          priority: t.priority,
+          type: t.subtitle || "general",
+          is_fixed: t.isFixed || false
+        };
+      });
+
+      const response = await axios.post(
+        "http://127.0.0.1:8000/export",
+        { schedule: schedulePayload },
+        { responseType: 'blob' }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'dayplan.ics');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 3000);
+    } catch (error) {
+      console.error(error);
+      alert("Export failed");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white flex font-sans">
-      
+
       {/* Sidebar */}
       <aside className="w-[280px] shrink-0 border-r border-[#222] flex flex-col p-6">
         {/* Logo */}
@@ -175,53 +296,60 @@ export default function App() {
         <div className="mb-8">
           <div className="text-xs font-semibold text-[#666] tracking-wider mb-2">TODAY</div>
           <div className="text-lg font-medium text-gray-200">{formattedDate}</div>
-        </div>
-
+          <LiveClock />
         {/* Slept at */}
         <div className="mb-6">
           <div className="text-xs font-semibold text-[#666] tracking-wider mb-2 uppercase">Slept at</div>
-          <div className="flex items-center gap-3">
-            <div className="bg-[#1a1a21] border border-[#333] rounded-xl px-4 py-3 flex items-center justify-between w-40 focus-within:border-[#555] transition-colors">
-              <input 
-                type="text" 
-                value={sleptAt}
-                onChange={(e) => setSleptAt(e.target.value)}
-                className="font-mono text-gray-200 font-medium tracking-wide bg-transparent outline-none w-20" 
-              />
-              <Clock className="w-4 h-4 text-[#888]" />
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <TimePicker value={sleptAt} onChange={setSleptAt} />
             </div>
-            {(() => {
-              const h = parseInt(convertTo24Hour(sleptAt).split(":")[0]);
-              if (h >= 1 && h <= 5) {
-                return (
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold">
-                    <Moon className="w-3.5 h-3.5" />
-                    nap
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            <button 
+              onClick={handleToggleSleptLock}
+              className={cn("mt-2 shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                isSleptLocked ? "bg-green-500/20 border border-green-500/30 text-green-500 hover:bg-green-500/30" : "bg-gray-500/10 border border-gray-500/20 text-gray-500 hover:bg-gray-500/20"
+              )}
+              title="Lock slept at time"
+            >
+              {isSleptLocked ? <CheckCircle2 className="w-5 h-5" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-500" />}
+            </button>
           </div>
+          {(() => {
+            const h = parseInt(sleptAt.split(":")[0]);
+            if (h >= 1 && h <= 5) {
+              return (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold mt-2 inline-flex">
+                  <Moon className="w-3.5 h-3.5" />
+                  nap
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
 
         {/* Wake Time */}
         <div className="mb-8">
           <div className="text-xs font-semibold text-[#666] tracking-wider mb-2 uppercase">Wake Time</div>
-          <div className="bg-[#1a1a21] border border-[#333] rounded-xl px-4 py-3 flex items-center justify-between w-40 focus-within:border-[#555] transition-colors mb-3">
-            <input 
-              type="text" 
-              value={wakeTime}
-              onChange={(e) => setWakeTime(e.target.value)}
-              className="font-mono text-gray-200 font-medium tracking-wide bg-transparent outline-none w-20" 
-            />
-            <Clock className="w-4 h-4 text-[#888]" />
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <TimePicker value={wakeTime} onChange={setWakeTime} />
+            </div>
+            <button 
+              onClick={handleToggleWakeLock}
+              className={cn("mt-2 shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                isWakeLocked ? "bg-green-500/20 border border-green-500/30 text-green-500 hover:bg-green-500/30" : "bg-gray-500/10 border border-gray-500/20 text-gray-500 hover:bg-gray-500/20"
+              )}
+              title="Lock wake time"
+            >
+              {isWakeLocked ? <CheckCircle2 className="w-5 h-5" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-500" />}
+            </button>
           </div>
           {uploadedFile && (
             <button 
-              onClick={handleRegenerate}
+              onClick={() => handleRegenerate()}
               disabled={loading}
-              className="w-40 py-2 bg-blue-600/20 text-blue-500 border border-blue-500/30 hover:bg-blue-600/30 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+              className="w-full mt-3 py-2 bg-blue-600/20 text-blue-500 border border-blue-500/30 hover:bg-blue-600/30 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
               {loading ? "Generating..." : "Regenerate"}
             </button>
@@ -261,16 +389,26 @@ export default function App() {
         </div>
 
         {/* Export Action */}
-        <button className="mt-8 flex items-center justify-center gap-2 w-full py-3.5 border border-[#333] rounded-xl hover:bg-[#15151a] transition-colors font-medium text-sm">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          Export to iPhone
-        </button>
+        <div className="mt-8">
+          {exportSuccess && (
+            <div className="mb-3 text-center text-xs font-semibold text-green-500 bg-green-500/10 border border-green-500/20 py-2 rounded-lg">
+              Exported! Open on iPhone to import
+            </div>
+          )}
+          <button
+            onClick={handleExport}
+            className="flex items-center justify-center gap-2 w-full py-3.5 border border-[#333] rounded-xl hover:bg-[#15151a] transition-colors font-medium text-sm"
+          >
+            <Calendar className="w-4 h-4 text-gray-400" />
+            Export to iPhone
+          </button>
+        </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto relative">
         <div className="max-w-4xl mx-auto px-8 py-8">
-          
+
           {/* Top Header - Normal or Extended */}
           {!isExtendedState ? (
             <div className="flex items-center justify-between mb-8">
@@ -282,14 +420,14 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-3">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  onChange={handleFileSelect} 
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={handleFileSelect}
                   accept="application/pdf"
                 />
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
                   className="flex items-center gap-2 px-5 py-2.5 border border-[#333] hover:bg-[#1a1a21] rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
@@ -297,7 +435,7 @@ export default function App() {
                   <Upload className="w-4 h-4" />
                   {loading ? "uploading..." : "upload schedule"}
                 </button>
-                <button 
+                <button
                   onClick={() => setIsAddModalOpen(true)}
                   className="flex items-center gap-2 px-5 py-2.5 bg-white text-black hover:bg-gray-200 rounded-xl text-sm font-semibold transition-colors"
                 >
@@ -318,7 +456,7 @@ export default function App() {
                     <Clock className="w-3 h-3" /> schedule adjusted
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setIsExtendedState(false)}
                   className="flex items-center gap-2 px-5 py-2.5 border border-[#333] hover:bg-[#1a1a21] rounded-xl text-sm font-medium transition-colors"
                 >
@@ -340,6 +478,8 @@ export default function App() {
               const isDropTask = task.title.includes("Drop sister");
               const isShifted = isExtendedState && i > 6 && !task.isFixed;
               const isFixed = task.isFixed || (isExtendedState && task.isDone) || task.priority === "routine";
+              const isOverdue = currentTime > task.time && !task.isDone && !isFixed; // only glow if it's not routine/fixed, or glow anyway? Let's glow all tasks that are late.
+              const finalIsOverdue = currentTime > task.time && !task.isDone;
 
               return (
                 <div key={`${task.title}-${task.time}-${i}`} className="relative -ml-[42px] pr-2">
@@ -348,6 +488,17 @@ export default function App() {
                     isFixed={isFixed}
                     extended={isExtendedState && isDropTask ? "+45min" : undefined}
                     shifted={isShifted}
+                    isOverdue={finalIsOverdue}
+                    onToggleDone={(isDone) => {
+                      setTasks(prev => {
+                        const newTasks = [...prev];
+                        newTasks[i] = { ...newTasks[i], isDone };
+                        return newTasks;
+                      });
+                    }}
+                    onDelete={() => {
+                      setTasks(prev => prev.filter((_, idx) => idx !== i));
+                    }}
                   />
                 </div>
               );

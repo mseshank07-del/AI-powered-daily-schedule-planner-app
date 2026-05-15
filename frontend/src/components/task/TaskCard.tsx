@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, Lock } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Check, Lock, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export type Priority = "urgent" | "medium" | "low" | "routine" | "sleep";
@@ -12,8 +12,10 @@ export type TaskCardProps = {
   priority: Priority;
   isDone?: boolean;
   isFixed?: boolean;
-  extended?: string;
   shifted?: boolean;
+  isOverdue?: boolean;
+  onToggleDone?: (isDone: boolean) => void;
+  onDelete?: () => void;
 };
 
 const priorityColors = {
@@ -34,8 +36,16 @@ export default function TaskCard({
   isFixed = false,
   extended,
   shifted = false,
+  isOverdue = false,
+  onToggleDone,
+  onDelete,
 }: TaskCardProps) {
   const [checked, setChecked] = useState(isDone);
+
+  // Sync internal state with external prop changes
+  useEffect(() => {
+    setChecked(isDone);
+  }, [isDone]);
 
   return (
     <div className="flex items-start gap-4 w-full">
@@ -49,7 +59,8 @@ export default function TaskCard({
         className={cn(
           "flex-1 relative bg-[#131317] rounded-xl p-4 transition-all group",
           shifted && "ring-1 ring-orange-500/50",
-          extended && "ring-1 ring-orange-500"
+          extended && "ring-1 ring-orange-500",
+          isOverdue && "ring-1 ring-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse"
         )}
       >
         {/* Priority color strip */}
@@ -63,7 +74,11 @@ export default function TaskCard({
         <div className="flex items-start gap-4 ml-2">
           {/* Checkbox */}
           <button
-            onClick={() => setChecked(!checked)}
+            onClick={() => {
+              const newChecked = !checked;
+              setChecked(newChecked);
+              onToggleDone?.(newChecked);
+            }}
             className={cn(
               "shrink-0 mt-0.5 w-5 h-5 rounded flex items-center justify-center transition-colors border",
               checked
@@ -101,6 +116,12 @@ export default function TaskCard({
                   <div className="px-2 py-0.5 rounded border border-orange-500/30 text-orange-400 text-xs font-medium bg-orange-500/10">
                     {extended}
                   </div>
+                )}
+
+                {onDelete && (
+                  <button onClick={onDelete} className="ml-2 text-gray-500 hover:text-red-400 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
                 )}
               </div>
             </div>

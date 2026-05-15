@@ -1,8 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, Query
+from fastapi import FastAPI, UploadFile, File, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Any
 from parser import extract_text_from_bytes
 from ai_call import extract_tasks
 from scheduler import build_schedule
+from export import generate_ics
+
+class SchedulePayload(BaseModel):
+    schedule: List[Dict[str, Any]]
 
 app = FastAPI(title="dayplan Backend")
 
@@ -32,3 +38,14 @@ async def upload_file(
         "filename": file.filename,
         "schedule": schedule
     }
+
+@app.post("/export")
+async def export_schedule(payload: SchedulePayload):
+    ics_content = generate_ics(payload.schedule)
+    return Response(
+        content=ics_content.encode("utf-8"),
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": "attachment; filename=dayplan.ics"
+        }
+    )

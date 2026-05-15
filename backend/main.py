@@ -1,19 +1,17 @@
 from fastapi import FastAPI, UploadFile, File
-from parser import extract_text
-import shutil
+from parser import extract_text_from_bytes
 
-app = FastAPI()
+app = FastAPI(title="dayplan Backend")
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    file_path = f"temp_{file.filename}"
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    text = extract_text(file_path)
-
+    # Read the file directly into memory without saving to disk
+    content = await file.read()
+    
+    # Extract text using our parser
+    text = extract_text_from_bytes(content, file.filename)
+    
     return {
         "filename": file.filename,
-        "text": text
+        "extracted_text": text
     }

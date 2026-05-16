@@ -34,6 +34,7 @@ export default function TaskCard({
   priority,
   isDone = false,
   isFixed = false,
+  isMissed = false,
   extended,
   shifted = false,
   isOverdue = false,
@@ -57,10 +58,15 @@ export default function TaskCard({
       {/* Card */}
       <div
         className={cn(
-          "flex-1 relative bg-[#131317] rounded-xl p-4 transition-all group",
+          "flex-1 relative rounded-xl p-4 transition-all group",
+          isDone 
+            ? "bg-green-500/10 border border-green-500/30 opacity-60 grayscale-[0.5]" 
+            : isMissed
+              ? "bg-gray-500/10 border border-[#333] opacity-40 grayscale"
+              : "bg-[#131317] border border-transparent hover:border-[#333]",
           shifted && "ring-1 ring-orange-500/50",
           extended && "ring-1 ring-orange-500",
-          isOverdue && "ring-1 ring-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse"
+          isOverdue && !isDone && !isMissed && "ring-1 ring-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse"
         )}
       >
         {/* Priority color strip */}
